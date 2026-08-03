@@ -1,0 +1,76 @@
+# Standardization QC — Gold vs. Silver Validation
+
+## What This Checks
+
+Our pipeline copies standardized data from the **silver** layer into the **gold** layer. This check makes sure that copy actually happened correctly — that every value in gold matches the value it was supposed to come from in silver.
+
+If gold and silver don't match, something broke in the pipeline. This tool finds exactly where.
+
+## The Two Tables We Compare
+
+- **Silver (`rgd_udm_silver`)** — the source of truth. Holds the standardized columns (they usually end in `_std`).
+- **Gold (`rgd_gold_ad`)** — the final, clean tables. These are supposed to be exact copies of silver's standardized values, just under simpler column names (e.g. silver's `gender_hl7_std` becomes gold's `gender`).
+
+We check: **did gold copy silver's value correctly, row by row?**
+
+## How We Match Rows Together
+
+To compare two rows, we first need to know they're the *same* row. We match them using:
+
+- Gold's `source_udm_inc_id`
+- Silver's `udm_inc_id` (silver's own unique row ID)
+
+A row matches when: `gold.source_udm_inc_id = silver.udm_inc_id`
+
+This works cleanly because `udm_inc_id` never repeats in silver — every gold row points to exactly one silver row (or to none, if something's missing upstream).
+
+We tried two other ID columns first, and both failed:
+- `udm_unq_id` — turned out to repeat in silver too, so it couldn't pair rows reliably.
+- `ndid` (patient ID) — repeats many times per patient in most tables (one row per encounter, per diagnosis, per lab result, etc.), so it can't tell individual rows apart.
+
+`source_udm_inc_id` / `udm_inc_id` is the only pair that gives a clean, reliable, one-to-one match.
+
+## How We Filter the Data
+
+We only check patients (`ndid`s) that actually exist in gold. If a patient isn't in gold, we don't pull their silver data either. This keeps every comparison scoped to exactly what gold contains — nothing more.
+
+## What Counts as a Match
+
+For each column we're checking, we compare gold's value against silver's value for that same matched row:
+
+- If both values are blank, that counts as a **match**.
+- If the values differ, or gold's row has no match in silver at all, that's a **mismatch**.
+
+Most columns map one-to-one (silver's `proc_code_std` → gold's `proc_code`). A few are built from more than one silver column — for example, gold's `cpt_code` comes from whichever of two silver columns actually has a value. The logic still checks: does gold's final value match what silver says it should be?
+
+## The Output Files
+
+### 1. Summary tab — `std_column_qc`
+
+One row per table + column being checked. At a glance, it tells you:
+
+- How many total rows are in gold
+- How many matched silver, and how many didn't (count and %)
+- The top 20 most common mismatched values, so you can spot patterns fast
+- How many patients (`ndid`s) are affected by mismatches in that column
+- A sample of the `psid`s (site/source IDs) those patients belong to
+
+Use this tab to answer: *"Which tables and columns have a problem, and how big is it?"*
+
+### 2. Detail files — `unmatched_detail_<table>.csv`
+
+One row per actual broken record. Each row shows:
+
+- The patient (`ndid`) and site (`psid`) it belongs to
+- The exact gold value vs. the exact silver value that didn't match
+- Which table and column it came from
+
+Use this file to answer: *"Show me every specific record that's broken, so I can investigate."*
+
+## How to Run It
+
+python gen.py
+
+
+
+This checks every table listed in the script and writes both output files.
