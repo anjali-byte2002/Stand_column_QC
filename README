@@ -69,7 +69,8 @@ Use this file to answer: *"Show me every specific record that's broken, so I can
 
 ## How to Run It
 
-python gen.py
+python gen_std_qc_final.py
+
 
 
 
